@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Clock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-top: #0b1020;
+    --bg-bottom: #05070f;
+    --fg: #eef2ff;
+    --dim: #7b86a8;
+    --accent: #7dd3fc;
+    --card-bg: rgba(255,255,255,0.04);
+    --card-border: rgba(255,255,255,0.08);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 20%, #131a33 0%, var(--bg-top) 45%, var(--bg-bottom) 100%);
+    font-family: 'Inter', sans-serif;
+    color: var(--fg);
+  }
+
+  #stage {
+    width: 100%; height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+  }
+
+  #date {
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  #clock {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 15vw;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    color: var(--fg);
+    text-shadow: 0 0 60px rgba(125, 211, 252, 0.15);
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: baseline;
+  }
+  #clock .sec {
+    font-size: 0.32em;
+    color: var(--dim);
+    margin-left: 0.15em;
+    font-weight: 500;
+  }
+
+  #weather {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    padding: 18px 34px;
+    border-radius: 20px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    backdrop-filter: blur(6px);
+  }
+  #weather-icon {
+    font-size: 48px;
+    line-height: 1;
+    filter: drop-shadow(0 0 16px rgba(125, 211, 252, 0.35));
+  }
+  #weather-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  #weather-temp {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 38px;
+    font-weight: 600;
+    line-height: 1;
+  }
+  #weather-cond {
+    font-size: 14px;
+    color: var(--dim);
+    letter-spacing: 0.03em;
+  }
+  #weather-lo-hi {
+    font-size: 13px;
+    color: var(--dim);
+    margin-top: 2px;
+  }
+
+  #weather.hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="date">--</div>
+  <div id="clock">--:--<span class="sec">--</span></div>
+  <div id="weather" class="hidden">
+    <div id="weather-icon">&#9728;</div>
+    <div id="weather-text">
+      <div id="weather-temp">--&deg;</div>
+      <div id="weather-cond">Loading&hellip;</div>
+      <div id="weather-lo-hi"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const LAT = 42.33967, LON = -71.05591;
+
+function weatherIcon(code, isDay) {
+  // WMO weather codes -> emoji
+  if (code === 0) return isDay ? '☀️' : '🌙';
+  if ([1, 2].includes(code)) return isDay ? '🌤️' : '🌤️';
+  if (code === 3) return '☁️';
+  if ([45, 48].includes(code)) return '🌫️';
+  if ([51, 53, 55, 56, 57].includes(code)) return '🌦️';
+  if ([61, 63, 65, 80, 81, 82].includes(code)) return '🌧️';
+  if ([66, 67].includes(code)) return '🌨️';
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return '🌨️';
+  if ([95, 96, 99].includes(code)) return '⛈️';
+  return '🌤️';
+}
+
+function weatherLabel(code) {
+  const map = {
+    0: 'Clear', 1: 'Mostly Clear', 2: 'Partly Cloudy', 3: 'Cloudy',
+    45: 'Fog', 48: 'Fog',
+    51: 'Light Drizzle', 53: 'Drizzle', 55: 'Heavy Drizzle',
+    56: 'Freezing Drizzle', 57: 'Freezing Drizzle',
+    61: 'Light Rain', 63: 'Rain', 65: 'Heavy Rain',
+    66: 'Freezing Rain', 67: 'Freezing Rain',
+    71: 'Light Snow', 73: 'Snow', 75: 'Heavy Snow', 77: 'Snow Grains',
+    80: 'Rain Showers', 81: 'Rain Showers', 82: 'Violent Showers',
+    85: 'Snow Showers', 86: 'Snow Showers',
+    95: 'Thunderstorm', 96: 'Thunderstorm', 99: 'Severe Thunderstorm',
+  };
+  return map[code] || 'Unknown';
+}
+
+function tick() {
+  const now = new Date();
+  const pad = n => n.toString().padStart(2, '0');
+  const h = pad(now.getHours());
+  const m = pad(now.getMinutes());
+  const s = pad(now.getSeconds());
+  document.getElementById('clock').innerHTML = `${h}:${m}<span class="sec">${s}</span>`;
+
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  document.getElementById('date').textContent =
+    `${days[now.getDay()]}, ${months[now.getMonth()]} ${now.getDate()}`;
+}
+tick();
+setInterval(tick, 1000);
+
+async function updateWeather() {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}` +
+      `&current_weather=true&daily=temperature_2m_max,temperature_2m_min` +
+      `&temperature_unit=fahrenheit&timezone=auto`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const cw = data.current_weather;
+    if (!cw) return;
+
+    document.getElementById('weather-icon').textContent = weatherIcon(cw.weathercode, cw.is_day);
+    document.getElementById('weather-temp').innerHTML = Math.round(cw.temperature) + '&deg;';
+    document.getElementById('weather-cond').textContent = weatherLabel(cw.weathercode);
+
+    if (data.daily && data.daily.temperature_2m_max && data.daily.temperature_2m_min) {
+      const hi = Math.round(data.daily.temperature_2m_max[0]);
+      const lo = Math.round(data.daily.temperature_2m_min[0]);
+      document.getElementById('weather-lo-hi').textContent = `H: ${hi}°  L: ${lo}°`;
+    }
+
+    document.getElementById('weather').classList.remove('hidden');
+  } catch (e) {
+    console.error('weather fetch failed', e);
+  }
+}
+updateWeather();
+setInterval(updateWeather, 10 * 60 * 1000);
+</script>
+</body>
+</html>
