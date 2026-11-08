@@ -54,12 +54,6 @@
     display: flex;
     align-items: baseline;
   }
-  #clock .sec {
-    font-size: 0.32em;
-    color: var(--dim);
-    margin-left: 0.15em;
-    font-weight: 500;
-  }
 
   #weather {
     display: flex;
@@ -104,7 +98,7 @@
 <body>
 <div id="stage">
   <div id="date">--</div>
-  <div id="clock">--:--<span class="sec">--</span></div>
+  <div id="clock">--:--</div>
   <div id="weather" class="hidden">
     <div id="weather-icon">&#9728;</div>
     <div id="weather-text">
@@ -153,8 +147,7 @@ function tick() {
   const pad = n => n.toString().padStart(2, '0');
   const h = pad(now.getHours());
   const m = pad(now.getMinutes());
-  const s = pad(now.getSeconds());
-  document.getElementById('clock').innerHTML = `${h}:${m}<span class="sec">${s}</span>`;
+  document.getElementById('clock').textContent = `${h}:${m}`;
 
   const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
