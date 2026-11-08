@@ -14,7 +14,7 @@ STATIC_DIR = os.environ.get("RADAR_STATIC_DIR", os.path.join(os.path.dirname(os.
 
 ADSBLOL_LAT = float(os.environ.get("ADSBLOL_LAT", "42.36"))
 ADSBLOL_LON = float(os.environ.get("ADSBLOL_LON", "-71.02"))
-ADSBLOL_RADIUS_NM = float(os.environ.get("ADSBLOL_RADIUS_NM", "150"))
+ADSBLOL_RADIUS_NM = float(os.environ.get("ADSBLOL_RADIUS_NM", "35"))
 
 _route_cache = {}
 ROUTE_TTL = 3600
