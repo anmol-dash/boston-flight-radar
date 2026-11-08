@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Boston Radar</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #000;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+  }
+  #map {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: #000;
+  }
+  .leaflet-container {
+    background: #000 !important;
+  }
+
+  .my-location-dot {
+    width: 8px; height: 8px;
+    background: #ff3333;
+    border-radius: 50%;
+    box-shadow: 0 0 6px 2px rgba(255,0,0,0.9);
+  }
+
+  .plane-icon {
+    color: #39ff6a;
+    text-shadow: 0 0 6px #0f0;
+    font-size: 20px;
+    line-height: 20px;
+    text-align: center;
+  }
+  .plane-label {
+    color: #39ff6a;
+    text-shadow: 0 0 4px #000, 0 0 4px #000, 0 0 2px #000;
+    font-size: 11px;
+    font-weight: bold;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .boat-icon {
+    color: #39d6ff;
+    text-shadow: 0 0 6px #0cf;
+    font-size: 16px;
+    line-height: 16px;
+    text-align: center;
+  }
+  .boat-label {
+    color: #39d6ff;
+    text-shadow: 0 0 4px #000, 0 0 4px #000, 0 0 2px #000;
+    font-size: 10px;
+    font-weight: bold;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .leaflet-tooltip.boat-label {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+  }
+  .leaflet-tooltip.boat-label::before {
+    display: none;
+  }
+
+  #clock-hud {
+    position: absolute; top: 10px; right: 14px;
+    color: #39ff6a;
+    text-shadow: 0 0 6px #0f0;
+    z-index: 1000;
+    font-size: 20px;
+    font-weight: bold;
+    pointer-events: none;
+  }
+
+  .leaflet-control-attribution { display: none; }
+
+  .leaflet-tooltip.plane-label {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+  }
+  .leaflet-tooltip.plane-label::before {
+    display: none;
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="clock-hud" id="clock-hud">--:--:--</div>
+
+<script>
+const BOS = [42.3656, -71.0096];
+const map = L.map('map', {
+  zoomControl: false,
+  attributionControl: false,
+  center: [42.36, -71.02],
+  zoom: 11,
+});
+
+L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 16,
+}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 16,
+}).addTo(map);
+
+// range rings around Logan, like a radar scope
+const RING_COLOR = '#39ff6a';
+[50, 100, 150].forEach(km => {
+  L.circle(BOS, {
+    radius: km * 1000,
+    color: RING_COLOR,
+    weight: 1,
+    opacity: 0.35,
+    fill: false,
+  }).addTo(map);
+});
+L.marker(BOS, {
+  icon: L.divIcon({ className: '', html: '<div style="color:#39ff6a;font-size:14px;text-shadow:0 0 6px #0f0;">&#9678; BOS</div>', iconSize: [40,20] })
+}).addTo(map);
+
+fetch('/mylocation')
+  .then(r => r.json())
+  .then(d => {
+    if (d && d.lat != null && d.lon != null) {
+      L.marker([d.lat, d.lon], {
+        icon: L.divIcon({ className: '', html: '<div class="my-location-dot"></div>', iconSize: [8,8], iconAnchor: [4,4] }),
+        zIndexOffset: 1000,
+      }).addTo(map);
+    }
+  })
+  .catch(() => {});
+
+const markers = {}; // icao24 -> {marker, label}
+const routeCache = {}; // callsign -> "ORIGIN -> DEST" or null (pending)
+const routeQueue = [];
+let routeInFlight = false;
+
+function processRouteQueue() {
+  if (routeInFlight || routeQueue.length === 0) return;
+  const callsign = routeQueue.shift();
+  if (routeCache[callsign] !== undefined) { processRouteQueue(); return; }
+  routeInFlight = true;
+  fetch('/route?callsign=' + encodeURIComponent(callsign))
+    .then(r => r.json())
+    .then(d => {
+      const fr = d && d.response && d.response.flightroute;
+      if (fr && fr.origin && fr.destination) {
+        const oCode = fr.origin.iata_code || fr.origin.icao_code || '???';
+        const oCity = fr.origin.municipality || oCode;
+        const dCode = fr.destination.iata_code || fr.destination.icao_code || '???';
+        const dCity = fr.destination.municipality || dCode;
+        routeCache[callsign] = `${oCity} (${oCode}) → ${dCity} (${dCode})`;
+      } else {
+        routeCache[callsign] = null;
+      }
+    })
+    .catch(() => { routeCache[callsign] = null; })
+    .finally(() => {
+      routeInFlight = false;
+      updateLabels();
+      setTimeout(processRouteQueue, 600);
+    });
+}
+
+function planeIconHtml(heading) {
+  return `<div class="plane-icon" style="transform: rotate(${heading}deg);">&#9992;</div>`;
+}
+
+function updateLabels() {
+  for (const icao in markers) {
+    const entry = markers[icao];
+    const route = routeCache[entry.callsign];
+    let text = entry.callsign || icao.toUpperCase();
+    if (route) text += '\n' + route;
+    entry.label.setTooltipContent(text.replace('\n', '<br>'));
+  }
+}
+
+async function refresh() {
+  try {
+    const res = await fetch('/states');
+    const data = await res.json();
+    const states = data.states || [];
+    const seen = new Set();
+
+    for (const s of states) {
+      const icao24 = s[0];
+      const callsign = (s[1] || '').trim();
+      const lon = s[5], lat = s[6];
+      const onGround = s[8];
+      const heading = s[10] || 0;
+      const altitude = s[13] || s[7];
+      const velocity = s[9];
+      if (lat == null || lon == null || onGround) continue;
+
+      seen.add(icao24);
+
+      if (!markers[icao24]) {
+        const marker = L.marker([lat, lon], {
+          icon: L.divIcon({ className: '', html: planeIconHtml(heading), iconSize: [20,20], iconAnchor: [10,10] })
+        }).addTo(map);
+        marker.bindTooltip(callsign || icao24.toUpperCase(), {
+          permanent: true, direction: 'bottom', offset: [0, 4], className: 'plane-label'
+        });
+        markers[icao24] = { marker, label: marker, callsign };
+      } else {
+        const entry = markers[icao24];
+        entry.marker.setLatLng([lat, lon]);
+        entry.marker.setIcon(L.divIcon({ className: '', html: planeIconHtml(heading), iconSize: [20,20], iconAnchor: [10,10] }));
+        entry.callsign = callsign;
+      }
+
+      if (callsign && routeCache[callsign] === undefined && !routeQueue.includes(callsign)) {
+        routeQueue.push(callsign);
+      }
+    }
+
+    // remove stale markers
+    for (const icao in markers) {
+      if (!seen.has(icao)) {
+        map.removeLayer(markers[icao].marker);
+        delete markers[icao];
+      }
+    }
+
+    updateLabels();
+    processRouteQueue();
+  } catch (e) {
+    console.error('refresh failed', e);
+  }
+}
+
+const boatMarkers = {}; // mmsi -> marker
+
+function boatIconHtml(heading) {
+  return `<div class="boat-icon" style="transform: rotate(${heading}deg);">&#9650;</div>`;
+}
+
+async function refreshBoats() {
+  try {
+    const res = await fetch('/vessels');
+    const data = await res.json();
+    const vessels = data.vessels || [];
+    const seen = new Set();
+
+    for (const v of vessels) {
+      const mmsi = v.mmsi;
+      const heading = (v.heading != null && v.heading !== 511) ? v.heading : (v.cog || 0);
+      seen.add(mmsi);
+      const name = v.name || ('MMSI ' + mmsi);
+
+      if (!boatMarkers[mmsi]) {
+        const marker = L.marker([v.lat, v.lon], {
+          icon: L.divIcon({ className: '', html: boatIconHtml(heading), iconSize: [16,16], iconAnchor: [8,8] })
+        }).addTo(map);
+        marker.bindTooltip(name, {
+          permanent: true, direction: 'bottom', offset: [0, 2], className: 'boat-label'
+        });
+        boatMarkers[mmsi] = marker;
+      } else {
+        boatMarkers[mmsi].setLatLng([v.lat, v.lon]);
+        boatMarkers[mmsi].setIcon(L.divIcon({ className: '', html: boatIconHtml(heading), iconSize: [16,16], iconAnchor: [8,8] }));
+      }
+    }
+
+    for (const mmsi in boatMarkers) {
+      if (!seen.has(Number(mmsi)) && !seen.has(mmsi)) {
+        map.removeLayer(boatMarkers[mmsi]);
+        delete boatMarkers[mmsi];
+      }
+    }
+  } catch (e) {
+    console.error('boat refresh failed', e);
+  }
+}
+
+function tickClock() {
+  const now = new Date();
+  const pad = n => n.toString().padStart(2, '0');
+  document.getElementById('clock-hud').textContent =
+    pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+refresh();
+setInterval(refresh, 12000);
+
+refreshBoats();
+setInterval(refreshBoats, 10000);
+</script>
+</body>
+</html>
