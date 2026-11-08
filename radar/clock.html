@@ -66,37 +66,40 @@
     backdrop-filter: blur(6px);
   }
   #weather-icon {
-    font-size: 48px;
+    font-size: 58px;
     line-height: 1;
     filter: drop-shadow(0 0 16px rgba(125, 211, 252, 0.35));
   }
   #weather-text {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    align-items: center;
+    gap: 26px;
   }
   #weather-temp {
     font-family: 'Space Grotesk', sans-serif;
-    font-size: 38px;
+    font-size: 48px;
     font-weight: 600;
     line-height: 1;
   }
+  #weather-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
   #weather-cond {
-    font-size: 20px;
+    font-size: 26px;
     color: var(--dim);
     letter-spacing: 0.03em;
   }
   #weather-lo-hi {
-    font-size: 18px;
+    font-size: 24px;
     color: var(--dim);
-    margin-top: 2px;
   }
   #weather-extra {
-    font-size: 18px;
+    font-size: 24px;
     color: var(--dim);
-    margin-top: 2px;
     display: flex;
-    gap: 14px;
+    gap: 16px;
   }
 
   #weather.hidden { display: none; }
@@ -110,11 +113,13 @@
     <div id="weather-icon">&#9728;</div>
     <div id="weather-text">
       <div id="weather-temp">--&deg;</div>
-      <div id="weather-cond">Loading&hellip;</div>
-      <div id="weather-lo-hi"></div>
-      <div id="weather-extra">
-        <span id="weather-humidity"></span>
-        <span id="weather-precip"></span>
+      <div id="weather-details">
+        <div id="weather-cond">Loading&hellip;</div>
+        <div id="weather-lo-hi"></div>
+        <div id="weather-extra">
+          <span id="weather-humidity"></span>
+          <span id="weather-precip"></span>
+        </div>
       </div>
     </div>
   </div>
