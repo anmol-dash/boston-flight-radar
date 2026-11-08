@@ -12,7 +12,9 @@ import websocket
 PORT = int(os.environ.get("RADAR_PORT", "8765"))
 STATIC_DIR = os.environ.get("RADAR_STATIC_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "radar"))
 
-BBOX = dict(lamin=41.5, lomin=-71.8, lamax=43.0, lomax=-69.8)
+ADSBLOL_LAT = float(os.environ.get("ADSBLOL_LAT", "42.36"))
+ADSBLOL_LON = float(os.environ.get("ADSBLOL_LON", "-71.02"))
+ADSBLOL_RADIUS_NM = float(os.environ.get("ADSBLOL_RADIUS_NM", "150"))
 
 _route_cache = {}
 ROUTE_TTL = 3600
@@ -102,9 +104,25 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/states":
             try:
-                qs = urllib.parse.urlencode(BBOX)
-                data = fetch_json(f"https://opensky-network.org/api/states/all?{qs}")
-                self._send(200, data)
+                url = f"https://api.adsb.lol/v2/point/{ADSBLOL_LAT}/{ADSBLOL_LON}/{ADSBLOL_RADIUS_NM}"
+                raw = fetch_json(url)
+                data = json.loads(raw)
+                states = []
+                for ac in data.get("ac", []):
+                    lat = ac.get("lat")
+                    lon = ac.get("lon")
+                    if lat is None or lon is None:
+                        continue
+                    icao24 = ac.get("hex", "")
+                    callsign = (ac.get("flight") or "").strip()
+                    alt_baro = ac.get("alt_baro")
+                    on_ground = alt_baro == "ground"
+                    altitude = None if on_ground else alt_baro
+                    heading = ac.get("track") or 0
+                    velocity = ac.get("gs")
+                    states.append([icao24, callsign, None, None, None, lon, lat,
+                                    altitude, on_ground, velocity, heading, None, None, altitude])
+                self._send(200, json.dumps({"states": states}).encode())
             except Exception as e:
                 self._send(502, json.dumps({"error": str(e)}).encode())
             return
