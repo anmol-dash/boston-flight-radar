@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Chicago</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.15/hls.min.js"></script>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #000;
+    overflow: hidden;
+  }
+  #video {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    object-fit: cover;
+    background: #000;
+  }
+  #label {
+    position: absolute; bottom: 14px; left: 18px;
+    color: #ffffff;
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-shadow: 0 0 8px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9);
+    opacity: 0.85;
+    pointer-events: none;
+  }
+  #status {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: #ffffff;
+    font-family: 'Inter', sans-serif;
+    font-size: 16px;
+    letter-spacing: 0.05em;
+    opacity: 0.6;
+  }
+</style>
+</head>
+<body>
+<video id="video" autoplay muted playsinline></video>
+<div id="label">Chicago &mdash; Willis Tower Skydeck</div>
+<div id="status">Loading live feed&hellip;</div>
+
+<script>
+const video = document.getElementById('video');
+const status = document.getElementById('status');
+const SRC = '/chicago/hls/master.m3u8';
+
+function hideStatus() { status.style.display = 'none'; }
+function showStatus(msg) { status.textContent = msg; status.style.display = ''; }
+
+function start() {
+  if (Hls.isSupported()) {
+    const hls = new Hls({
+      liveSyncDurationCount: 3,
+      manifestLoadingMaxRetry: 8,
+      levelLoadingMaxRetry: 8,
+      fragLoadingMaxRetry: 8,
+    });
+    hls.loadSource(SRC);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      hideStatus();
+      video.play().catch(() => {});
+    });
+    hls.on(Hls.Events.ERROR, (event, data) => {
+      if (data.fatal) {
+        showStatus('Reconnecting…');
+        setTimeout(() => {
+          hls.loadSource(SRC + '?_=' + Date.now());
+          hls.attachMedia(video);
+        }, 3000);
+      }
+    });
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = SRC;
+    video.addEventListener('loadedmetadata', () => {
+      hideStatus();
+      video.play().catch(() => {});
+    });
+  }
+}
+start();
+</script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import threading
 import time
 import urllib.request
@@ -23,6 +24,30 @@ MY_LOCATION = {
     "lon": float(os.environ.get("MY_LOCATION_LON", "-71.05591")),
     "label": os.environ.get("MY_LOCATION_LABEL", "55 W 5th St, South Boston"),
 }
+
+EARTHCAM_PAGE_URL = "https://www.earthcam.com/usa/illinois/chicago/skydeck/"
+EARTHCAM_STREAM_BASE = "https://videos-3.earthcam.com/fecnetwork/22820.flv"
+EARTHCAM_HEADERS = {
+    "Referer": EARTHCAM_PAGE_URL,
+    "Origin": "https://www.earthcam.com",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+}
+_chicago_token = {"t": "", "td": "", "fetched": 0}
+CHICAGO_TOKEN_TTL = 240
+
+
+def _refresh_chicago_token():
+    now = time.time()
+    if _chicago_token["t"] and now - _chicago_token["fetched"] < CHICAGO_TOKEN_TTL:
+        return
+    raw = fetch_json(EARTHCAM_PAGE_URL, headers=EARTHCAM_HEADERS).decode("utf-8", "ignore")
+    m = re.search(r'"stream":"(https?:\\/\\/videos-3\.earthcam\.com\\/fecnetwork\\/22820\.flv\\/playlist\.m3u8\?t=([^"&\\]+)&td=([^"&\\]+))"', raw)
+    if not m:
+        raise RuntimeError("could not find chicago stream token")
+    _chicago_token["t"] = m.group(2)
+    _chicago_token["td"] = m.group(3)
+    _chicago_token["fetched"] = now
+
 
 AISSTREAM_API_KEY = os.environ.get("AISSTREAM_API_KEY", "")
 AIS_BBOX = [[42.25, -71.10], [42.42, -70.85]]  # Boston Harbor + approaches
@@ -155,6 +180,31 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/mylocation":
             self._send(200, json.dumps(MY_LOCATION).encode())
+            return
+
+        if parsed.path == "/chicago/hls/master.m3u8":
+            try:
+                _refresh_chicago_token()
+                url = f"{EARTHCAM_STREAM_BASE}/playlist.m3u8?t={_chicago_token['t']}&td={_chicago_token['td']}"
+                body = fetch_json(url, headers=EARTHCAM_HEADERS)
+                self._send(200, body, "application/vnd.apple.mpegurl")
+            except Exception as e:
+                self._send(502, str(e).encode(), "text/plain")
+            return
+
+        if parsed.path.startswith("/chicago/hls/"):
+            filename = parsed.path[len("/chicago/hls/"):]
+            if not re.fullmatch(r"[A-Za-z0-9_.]+", filename):
+                self._send(400, b"bad filename", "text/plain")
+                return
+            try:
+                _refresh_chicago_token()
+                url = f"{EARTHCAM_STREAM_BASE}/{filename}?t={_chicago_token['t']}&td={_chicago_token['td']}"
+                body = fetch_json(url, headers=EARTHCAM_HEADERS)
+                ctype = "video/mp2t" if filename.endswith(".ts") else "application/vnd.apple.mpegurl"
+                self._send(200, body, ctype)
+            except Exception as e:
+                self._send(502, str(e).encode(), "text/plain")
             return
 
         # static file serving
