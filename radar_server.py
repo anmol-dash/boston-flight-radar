@@ -25,28 +25,44 @@ MY_LOCATION = {
     "label": os.environ.get("MY_LOCATION_LABEL", "55 W 5th St, South Boston"),
 }
 
-EARTHCAM_PAGE_URL = "https://www.earthcam.com/usa/illinois/chicago/skydeck/"
-EARTHCAM_STREAM_BASE = "https://videos-3.earthcam.com/fecnetwork/22820.flv"
-EARTHCAM_HEADERS = {
-    "Referer": EARTHCAM_PAGE_URL,
-    "Origin": "https://www.earthcam.com",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+EARTHCAM_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+EARTHCAM_FEEDS = {
+    "chicago": {
+        "page_url": "https://www.earthcam.com/usa/illinois/chicago/skydeck/",
+        "flv_name": "22820.flv",
+    },
+    "london": {
+        "page_url": "https://www.earthcam.com/world/england/london/abbeyroad/",
+        "flv_name": "AbbeyRoadHD1.flv",
+    },
 }
-_chicago_token = {"t": "", "td": "", "fetched": 0}
-CHICAGO_TOKEN_TTL = 240
+_earthcam_tokens = {name: {"t": "", "td": "", "fetched": 0} for name in EARTHCAM_FEEDS}
+EARTHCAM_TOKEN_TTL = 240
 
 
-def _refresh_chicago_token():
+def _earthcam_headers(feed):
+    return {
+        "Referer": EARTHCAM_FEEDS[feed]["page_url"],
+        "Origin": "https://www.earthcam.com",
+        "User-Agent": EARTHCAM_USER_AGENT,
+    }
+
+
+def _refresh_earthcam_token(feed):
+    cfg = EARTHCAM_FEEDS[feed]
+    token = _earthcam_tokens[feed]
     now = time.time()
-    if _chicago_token["t"] and now - _chicago_token["fetched"] < CHICAGO_TOKEN_TTL:
+    if token["t"] and now - token["fetched"] < EARTHCAM_TOKEN_TTL:
         return
-    raw = fetch_json(EARTHCAM_PAGE_URL, headers=EARTHCAM_HEADERS).decode("utf-8", "ignore")
-    m = re.search(r'"stream":"(https?:\\/\\/videos-3\.earthcam\.com\\/fecnetwork\\/22820\.flv\\/playlist\.m3u8\?t=([^"&\\]+)&td=([^"&\\]+))"', raw)
+    raw = fetch_json(cfg["page_url"], headers=_earthcam_headers(feed)).decode("utf-8", "ignore")
+    flv_escaped = re.escape(cfg["flv_name"]).replace("/", r"\\/")
+    pattern = r'"stream":"https?:\\/\\/videos-3\.earthcam\.com\\/fecnetwork\\/' + flv_escaped + r'\\/playlist\.m3u8\?t=([^"&\\]+)&td=([^"&\\]+)"'
+    m = re.search(pattern, raw)
     if not m:
-        raise RuntimeError("could not find chicago stream token")
-    _chicago_token["t"] = m.group(2)
-    _chicago_token["td"] = m.group(3)
-    _chicago_token["fetched"] = now
+        raise RuntimeError(f"could not find {feed} stream token")
+    token["t"] = m.group(1)
+    token["td"] = m.group(2)
+    token["fetched"] = now
 
 
 AISSTREAM_API_KEY = os.environ.get("AISSTREAM_API_KEY", "")
@@ -182,25 +198,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(MY_LOCATION).encode())
             return
 
-        if parsed.path == "/chicago/hls/master.m3u8":
+        earthcam_match = re.fullmatch(r"/(chicago|london)/hls/([A-Za-z0-9_.]+)", parsed.path)
+        if earthcam_match:
+            feed, filename = earthcam_match.group(1), earthcam_match.group(2)
             try:
-                _refresh_chicago_token()
-                url = f"{EARTHCAM_STREAM_BASE}/playlist.m3u8?t={_chicago_token['t']}&td={_chicago_token['td']}"
-                body = fetch_json(url, headers=EARTHCAM_HEADERS)
-                self._send(200, body, "application/vnd.apple.mpegurl")
-            except Exception as e:
-                self._send(502, str(e).encode(), "text/plain")
-            return
-
-        if parsed.path.startswith("/chicago/hls/"):
-            filename = parsed.path[len("/chicago/hls/"):]
-            if not re.fullmatch(r"[A-Za-z0-9_.]+", filename):
-                self._send(400, b"bad filename", "text/plain")
-                return
-            try:
-                _refresh_chicago_token()
-                url = f"{EARTHCAM_STREAM_BASE}/{filename}?t={_chicago_token['t']}&td={_chicago_token['td']}"
-                body = fetch_json(url, headers=EARTHCAM_HEADERS)
+                _refresh_earthcam_token(feed)
+                token = _earthcam_tokens[feed]
+                flv_name = EARTHCAM_FEEDS[feed]["flv_name"]
+                name = "playlist.m3u8" if filename == "master.m3u8" else filename
+                url = f"https://videos-3.earthcam.com/fecnetwork/{flv_name}/{name}?t={token['t']}&td={token['td']}"
+                body = fetch_json(url, headers=_earthcam_headers(feed))
                 ctype = "video/mp2t" if filename.endswith(".ts") else "application/vnd.apple.mpegurl"
                 self._send(200, body, ctype)
             except Exception as e:
