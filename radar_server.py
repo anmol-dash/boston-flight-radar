@@ -65,6 +65,18 @@ def _refresh_earthcam_token(feed):
     token["fetched"] = now
 
 
+_stopwatch_lock = threading.Lock()
+_stopwatch = {"running": False, "started_at": None, "accumulated": 0.0}
+
+
+def _stopwatch_state():
+    with _stopwatch_lock:
+        elapsed = _stopwatch["accumulated"]
+        if _stopwatch["running"]:
+            elapsed += time.time() - _stopwatch["started_at"]
+        return {"running": _stopwatch["running"], "elapsed": elapsed}
+
+
 AISSTREAM_API_KEY = os.environ.get("AISSTREAM_API_KEY", "")
 AIS_BBOX = [[42.25, -71.10], [42.42, -70.85]]  # Boston Harbor + approaches
 VESSEL_STALE_SECONDS = 900
@@ -198,6 +210,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(MY_LOCATION).encode())
             return
 
+        if parsed.path == "/stopwatch/state":
+            self._send(200, json.dumps(_stopwatch_state()).encode())
+            return
+
         earthcam_match = re.fullmatch(r"/(chicago|london)/hls/([A-Za-z0-9_.]+)", parsed.path)
         if earthcam_match:
             feed, filename = earthcam_match.group(1), earthcam_match.group(2)
@@ -231,8 +247,41 @@ class Handler(BaseHTTPRequestHandler):
         except FileNotFoundError:
             self._send(404, b"not found", "text/plain")
 
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        now = time.time()
+        if parsed.path == "/stopwatch/start":
+            with _stopwatch_lock:
+                if not _stopwatch["running"]:
+                    _stopwatch["running"] = True
+                    _stopwatch["started_at"] = now
+        elif parsed.path == "/stopwatch/stop":
+            with _stopwatch_lock:
+                if _stopwatch["running"]:
+                    _stopwatch["accumulated"] += now - _stopwatch["started_at"]
+                    _stopwatch["running"] = False
+                    _stopwatch["started_at"] = None
+        elif parsed.path == "/stopwatch/toggle":
+            with _stopwatch_lock:
+                if _stopwatch["running"]:
+                    _stopwatch["accumulated"] += now - _stopwatch["started_at"]
+                    _stopwatch["running"] = False
+                    _stopwatch["started_at"] = None
+                else:
+                    _stopwatch["running"] = True
+                    _stopwatch["started_at"] = now
+        elif parsed.path == "/stopwatch/reset":
+            with _stopwatch_lock:
+                _stopwatch["running"] = False
+                _stopwatch["started_at"] = None
+                _stopwatch["accumulated"] = 0.0
+        else:
+            self._send(404, b"not found", "text/plain")
+            return
+        self._send(200, json.dumps(_stopwatch_state()).encode())
+
 if __name__ == "__main__":
-    host = os.environ.get("RADAR_HOST", "127.0.0.1")
+    host = os.environ.get("RADAR_HOST", "0.0.0.0")
     server = ThreadingHTTPServer((host, PORT), Handler)
     print(f"serving on {host}:{PORT}")
     server.serve_forever()

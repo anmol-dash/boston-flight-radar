@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Stopwatch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-top: #0b1020;
+    --bg-bottom: #05070f;
+    --fg: #ffffff;
+    --dim: #ffffff;
+    --accent: #7dd3fc;
+    --running: #39ff6a;
+    --stopped: #ff6a6a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 20%, #131a33 0%, var(--bg-top) 45%, var(--bg-bottom) 100%);
+    font-family: 'Inter', sans-serif;
+    color: var(--fg);
+  }
+
+  #clock-hud {
+    position: absolute; top: 16px; right: 20px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--fg);
+    opacity: 0.75;
+    font-variant-numeric: tabular-nums;
+  }
+
+  #stage {
+    width: 100%; height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+  }
+
+  #status {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  #status-dot {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--stopped);
+    box-shadow: 0 0 10px 2px var(--stopped);
+  }
+  #status.running #status-dot {
+    background: var(--running);
+    box-shadow: 0 0 10px 2px var(--running);
+  }
+
+  #stopwatch {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 16vw;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    color: var(--fg);
+    text-shadow: 0 0 60px rgba(125, 211, 252, 0.15);
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: baseline;
+  }
+  #stopwatch .ms {
+    font-size: 0.4em;
+    opacity: 0.6;
+    margin-left: 0.08em;
+  }
+</style>
+</head>
+<body>
+<div id="clock-hud">--:--</div>
+<div id="stage">
+  <div id="status"><div id="status-dot"></div><span id="status-text">Stopped</span></div>
+  <div id="stopwatch">00:00<span class="ms">.0</span></div>
+</div>
+
+<script>
+function tickClock() {
+  const now = new Date();
+  const pad = n => n.toString().padStart(2, '0');
+  document.getElementById('clock-hud').textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+let serverElapsed = 0;
+let serverRunning = false;
+let syncedAtPerf = performance.now();
+
+function currentElapsed() {
+  let e = serverElapsed;
+  if (serverRunning) e += (performance.now() - syncedAtPerf) / 1000;
+  return e;
+}
+
+function formatElapsed(totalSeconds) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  const tenths = Math.floor((totalSeconds * 10) % 10);
+  const pad = n => n.toString().padStart(2, '0');
+  const main = hours > 0 ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
+  return [main, tenths];
+}
+
+function render() {
+  const [main, tenths] = formatElapsed(currentElapsed());
+  document.getElementById('stopwatch').innerHTML = `${main}<span class="ms">.${tenths}</span>`;
+  const statusEl = document.getElementById('status');
+  statusEl.classList.toggle('running', serverRunning);
+  document.getElementById('status-text').textContent = serverRunning ? 'Running' : 'Stopped';
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+async function syncState() {
+  try {
+    const res = await fetch('/stopwatch/state');
+    const data = await res.json();
+    serverElapsed = data.elapsed;
+    serverRunning = data.running;
+    syncedAtPerf = performance.now();
+  } catch (e) {
+    console.error('stopwatch sync failed', e);
+  }
+}
+syncState();
+setInterval(syncState, 1500);
+</script>
+</body>
+</html>
