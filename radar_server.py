@@ -84,6 +84,37 @@ VESSEL_STALE_SECONDS = 900
 _vessels = {}
 _vessels_lock = threading.Lock()
 
+_vessel_meta = {}
+_vessel_meta_lock = threading.Lock()
+
+AIS_SHIP_TYPE_LABELS = {
+    30: "Fishing", 31: "Towing", 32: "Towing", 33: "Dredging",
+    34: "Diving Ops", 35: "Military", 36: "Sailing", 37: "Pleasure Craft",
+    50: "Pilot Vessel", 51: "SAR", 52: "Tug", 53: "Port Tender",
+    54: "Anti-Pollution", 55: "Law Enforcement", 58: "Medical",
+    59: "Noncombatant",
+}
+
+
+def _ship_type_label(code):
+    if code is None:
+        return None
+    if code in AIS_SHIP_TYPE_LABELS:
+        return AIS_SHIP_TYPE_LABELS[code]
+    if 20 <= code <= 29:
+        return "Wing in Ground"
+    if 40 <= code <= 49:
+        return "High Speed Craft"
+    if 60 <= code <= 69:
+        return "Passenger"
+    if 70 <= code <= 79:
+        return "Cargo"
+    if 80 <= code <= 89:
+        return "Tanker"
+    if 90 <= code <= 99:
+        return "Other"
+    return None
+
 
 def _ais_worker():
     if not AISSTREAM_API_KEY:
@@ -95,7 +126,7 @@ def _ais_worker():
             sub = {
                 "APIKey": AISSTREAM_API_KEY,
                 "BoundingBoxes": [AIS_BBOX],
-                "FilterMessageTypes": ["PositionReport"],
+                "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
             }
             ws.send(json.dumps(sub))
             while True:
@@ -106,13 +137,24 @@ def _ais_worker():
                     msg = json.loads(raw)
                 except json.JSONDecodeError:
                     continue
-                if msg.get("MessageType") != "PositionReport":
-                    continue
+                msg_type = msg.get("MessageType")
                 meta = msg.get("MetaData", {})
-                pr = msg.get("Message", {}).get("PositionReport", {})
                 mmsi = meta.get("MMSI")
                 if mmsi is None:
                     continue
+
+                if msg_type == "ShipStaticData":
+                    static = msg.get("Message", {}).get("ShipStaticData", {})
+                    with _vessel_meta_lock:
+                        _vessel_meta[mmsi] = {
+                            "name": (static.get("Name") or "").strip() or None,
+                            "shipType": _ship_type_label(static.get("Type")),
+                        }
+                    continue
+
+                if msg_type != "PositionReport":
+                    continue
+                pr = msg.get("Message", {}).get("PositionReport", {})
                 lat = pr.get("Latitude", meta.get("latitude"))
                 lon = pr.get("Longitude", meta.get("longitude"))
                 if lat is None or lon is None:
@@ -173,8 +215,9 @@ class Handler(BaseHTTPRequestHandler):
                     altitude = None if on_ground else alt_baro
                     heading = ac.get("track") or 0
                     velocity = ac.get("gs")
+                    actype = (ac.get("t") or "").strip() or None
                     states.append([icao24, callsign, None, None, None, lon, lat,
-                                    altitude, on_ground, velocity, heading, None, None, altitude])
+                                    altitude, on_ground, velocity, heading, None, None, altitude, actype])
                 self._send(200, json.dumps({"states": states}).encode())
             except Exception as e:
                 self._send(502, json.dumps({"error": str(e)}).encode())
@@ -202,7 +245,15 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/vessels":
             now = time.time()
             with _vessels_lock:
-                fresh = [v for v in _vessels.values() if now - v["updated"] < VESSEL_STALE_SECONDS]
+                fresh = [dict(v) for v in _vessels.values() if now - v["updated"] < VESSEL_STALE_SECONDS]
+            with _vessel_meta_lock:
+                for v in fresh:
+                    meta = _vessel_meta.get(v["mmsi"])
+                    if meta:
+                        v["name"] = v["name"] or meta["name"]
+                        v["shipType"] = meta["shipType"]
+                    else:
+                        v["shipType"] = None
             self._send(200, json.dumps({"vessels": fresh}).encode())
             return
 

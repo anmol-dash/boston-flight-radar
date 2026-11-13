@@ -179,6 +179,7 @@ function updateLabels() {
     const entry = markers[icao];
     const route = routeCache[entry.callsign];
     let text = entry.callsign || icao.toUpperCase();
+    if (entry.actype) text += ` (${entry.actype})`;
     if (route) text += '\n' + route;
     entry.label.setTooltipContent(text.replace('\n', '<br>'));
   }
@@ -199,6 +200,7 @@ async function refresh() {
       const heading = s[10] || 0;
       const altitude = s[13] || s[7];
       const velocity = s[9];
+      const actype = s[14] || null;
       if (lat == null || lon == null || onGround) continue;
 
       seen.add(icao24);
@@ -210,12 +212,13 @@ async function refresh() {
         marker.bindTooltip(callsign || icao24.toUpperCase(), {
           permanent: true, direction: 'bottom', offset: [0, 4], className: 'plane-label'
         });
-        markers[icao24] = { marker, label: marker, callsign };
+        markers[icao24] = { marker, label: marker, callsign, actype };
       } else {
         const entry = markers[icao24];
         entry.marker.setLatLng([lat, lon]);
         entry.marker.setIcon(L.divIcon({ className: '', html: planeIconHtml(heading), iconSize: [20,20], iconAnchor: [10,10] }));
         entry.callsign = callsign;
+        entry.actype = actype;
       }
 
       if (callsign && routeCache[callsign] === undefined && !routeQueue.includes(callsign)) {
@@ -255,19 +258,21 @@ async function refreshBoats() {
       const mmsi = v.mmsi;
       const heading = (v.heading != null && v.heading !== 511) ? v.heading : (v.cog || 0);
       seen.add(mmsi);
-      const name = v.name || ('MMSI ' + mmsi);
+      let label = v.name || ('MMSI ' + mmsi);
+      if (v.shipType) label += ` (${v.shipType})`;
 
       if (!boatMarkers[mmsi]) {
         const marker = L.marker([v.lat, v.lon], {
           icon: L.divIcon({ className: '', html: boatIconHtml(heading), iconSize: [16,16], iconAnchor: [8,8] })
         }).addTo(map);
-        marker.bindTooltip(name, {
+        marker.bindTooltip(label, {
           permanent: true, direction: 'bottom', offset: [0, 2], className: 'boat-label'
         });
         boatMarkers[mmsi] = marker;
       } else {
         boatMarkers[mmsi].setLatLng([v.lat, v.lon]);
         boatMarkers[mmsi].setIcon(L.divIcon({ className: '', html: boatIconHtml(heading), iconSize: [16,16], iconAnchor: [8,8] }));
+        boatMarkers[mmsi].setTooltipContent(label);
       }
     }
 
