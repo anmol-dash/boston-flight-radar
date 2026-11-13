@@ -19,6 +19,9 @@ ADSBLOL_RADIUS_NM = float(os.environ.get("ADSBLOL_RADIUS_NM", "35"))
 
 _route_cache = {}
 ROUTE_TTL = 3600
+
+_actype_cache = {}
+ACTYPE_TTL = 86400
 MY_LOCATION = {
     "lat": float(os.environ.get("MY_LOCATION_LAT", "42.33967")),
     "lon": float(os.environ.get("MY_LOCATION_LON", "-71.05591")),
@@ -215,9 +218,8 @@ class Handler(BaseHTTPRequestHandler):
                     altitude = None if on_ground else alt_baro
                     heading = ac.get("track") or 0
                     velocity = ac.get("gs")
-                    actype = (ac.get("t") or "").strip() or None
                     states.append([icao24, callsign, None, None, None, lon, lat,
-                                    altitude, on_ground, velocity, heading, None, None, altitude, actype])
+                                    altitude, on_ground, velocity, heading, None, None, altitude])
                 self._send(200, json.dumps({"states": states}).encode())
             except Exception as e:
                 self._send(502, json.dumps({"error": str(e)}).encode())
@@ -240,6 +242,33 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, data)
             except Exception as e:
                 self._send(502, json.dumps({"error": str(e)}).encode())
+            return
+
+        if parsed.path == "/actype":
+            params = urllib.parse.parse_qs(parsed.query)
+            icao24 = (params.get("icao24", [""])[0] or "").strip().lower()
+            if not icao24:
+                self._send(400, json.dumps({"error": "missing icao24"}).encode())
+                return
+            now = time.time()
+            cached = _actype_cache.get(icao24)
+            if cached and now - cached[0] < ACTYPE_TTL:
+                self._send(200, json.dumps({"name": cached[1]}).encode())
+                return
+            name = None
+            try:
+                data = json.loads(fetch_json(f"https://api.adsbdb.com/v0/aircraft/{urllib.parse.quote(icao24)}"))
+                aircraft = (data.get("response") or {})
+                if isinstance(aircraft, dict):
+                    aircraft = aircraft.get("aircraft")
+                if aircraft:
+                    manufacturer = (aircraft.get("manufacturer") or "").strip()
+                    actype = (aircraft.get("type") or "").strip()
+                    name = f"{manufacturer} {actype}".strip() or aircraft.get("icao_type") or None
+            except Exception:
+                name = None
+            _actype_cache[icao24] = (now, name)
+            self._send(200, json.dumps({"name": name}).encode())
             return
 
         if parsed.path == "/vessels":

@@ -143,6 +143,26 @@ const routeCache = {}; // callsign -> "ORIGIN -> DEST" or null (pending)
 const routeQueue = [];
 let routeInFlight = false;
 
+const actypeCache = {}; // icao24 -> aircraft name or null
+const actypeQueue = [];
+let actypeInFlight = false;
+
+function processActypeQueue() {
+  if (actypeInFlight || actypeQueue.length === 0) return;
+  const icao24 = actypeQueue.shift();
+  if (actypeCache[icao24] !== undefined) { processActypeQueue(); return; }
+  actypeInFlight = true;
+  fetch('/actype?icao24=' + encodeURIComponent(icao24))
+    .then(r => r.json())
+    .then(d => { actypeCache[icao24] = d && d.name ? d.name : null; })
+    .catch(() => { actypeCache[icao24] = null; })
+    .finally(() => {
+      actypeInFlight = false;
+      updateLabels();
+      setTimeout(processActypeQueue, 600);
+    });
+}
+
 function processRouteQueue() {
   if (routeInFlight || routeQueue.length === 0) return;
   const callsign = routeQueue.shift();
@@ -178,8 +198,9 @@ function updateLabels() {
   for (const icao in markers) {
     const entry = markers[icao];
     const route = routeCache[entry.callsign];
+    const actype = actypeCache[icao];
     let text = entry.callsign || icao.toUpperCase();
-    if (entry.actype) text += ` (${entry.actype})`;
+    if (actype) text += ` (${actype})`;
     if (route) text += '\n' + route;
     entry.label.setTooltipContent(text.replace('\n', '<br>'));
   }
@@ -200,7 +221,6 @@ async function refresh() {
       const heading = s[10] || 0;
       const altitude = s[13] || s[7];
       const velocity = s[9];
-      const actype = s[14] || null;
       if (lat == null || lon == null || onGround) continue;
 
       seen.add(icao24);
@@ -212,17 +232,19 @@ async function refresh() {
         marker.bindTooltip(callsign || icao24.toUpperCase(), {
           permanent: true, direction: 'bottom', offset: [0, 4], className: 'plane-label'
         });
-        markers[icao24] = { marker, label: marker, callsign, actype };
+        markers[icao24] = { marker, label: marker, callsign };
       } else {
         const entry = markers[icao24];
         entry.marker.setLatLng([lat, lon]);
         entry.marker.setIcon(L.divIcon({ className: '', html: planeIconHtml(heading), iconSize: [20,20], iconAnchor: [10,10] }));
         entry.callsign = callsign;
-        entry.actype = actype;
       }
 
       if (callsign && routeCache[callsign] === undefined && !routeQueue.includes(callsign)) {
         routeQueue.push(callsign);
+      }
+      if (actypeCache[icao24] === undefined && !actypeQueue.includes(icao24)) {
+        actypeQueue.push(icao24);
       }
     }
 
@@ -236,6 +258,7 @@ async function refresh() {
 
     updateLabels();
     processRouteQueue();
+    processActypeQueue();
   } catch (e) {
     console.error('refresh failed', e);
   }
